@@ -3,3 +3,5 @@ httpx
 motor
 pydantic
 python-dotenv
+uvicorn
+fastapi
