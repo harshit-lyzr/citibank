@@ -1,0 +1,5 @@
+yfinance
+httpx
+motor
+pydantic
+python-dotenv
