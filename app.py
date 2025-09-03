@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from uuid import uuid4
 from datetime import datetime
@@ -6,6 +6,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
+from daily_analysis import DailyAnalyzer
+from news_analysis import NewsAnalyzer
 
 load_dotenv()
 
@@ -65,3 +68,109 @@ async def get_news_by_id(news_id: str):
     if not news:
         raise HTTPException(status_code=404, detail="News not found")
     return NewsItem(**{k: v for k, v in news.items() if k != "_id"})
+
+# ----- Daily Analysis Endpoint -----
+@app.post("/trigger-daily-analysis")
+async def trigger_daily_analysis(background_tasks: BackgroundTasks):
+    """Trigger daily portfolio analysis manually"""
+    try:
+        # Run analysis in background
+        background_tasks.add_task(run_daily_analysis_task)
+        
+        return {
+            "status": "success",
+            "message": "Daily analysis started in background",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start daily analysis: {str(e)}")
+
+@app.get("/daily-analysis/status")
+async def get_daily_analysis_status():
+    """Get the latest daily analysis results"""
+    try:
+        # Connect to analysis collection
+        analysis_collection = db["daily_analysis"]
+        
+        # Get latest analysis results
+        cursor = analysis_collection.find().sort("created_at", -1).limit(10)
+        results = await cursor.to_list(length=10)
+        
+        if not results:
+            return {"status": "no_data", "message": "No analysis results found"}
+        
+        # Clean results
+        cleaned_results = [clean_doc(result) for result in results]
+        
+        return {
+            "status": "success",
+            "latest_analyses": cleaned_results,
+            "count": len(cleaned_results)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get analysis status: {str(e)}")
+
+async def run_daily_analysis_task():
+    """Background task to run daily analysis"""
+    analyzer = DailyAnalyzer()
+    try:
+        await analyzer.connect()
+        await analyzer.run_daily_analysis()
+    except Exception as e:
+        print(f"Error in daily analysis task: {e}")
+    finally:
+        await analyzer.disconnect()
+
+# ----- News Analysis Endpoints -----
+@app.post("/trigger-news-analysis")
+async def trigger_news_analysis(background_tasks: BackgroundTasks):
+    """Trigger news analysis manually"""
+    try:
+        # Run analysis in background
+        background_tasks.add_task(run_news_analysis_task)
+        
+        return {
+            "status": "success",
+            "message": "News analysis started in background",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start news analysis: {str(e)}")
+
+@app.get("/news-analysis/status")
+async def get_news_analysis_status():
+    """Get the latest news analysis results"""
+    try:
+        # Connect to news analysis collection
+        news_analysis_collection = db["news_analysis"]
+        
+        # Get latest analysis results
+        cursor = news_analysis_collection.find().sort("created_at", -1).limit(10)
+        results = await cursor.to_list(length=10)
+        
+        if not results:
+            return {"status": "no_data", "message": "No news analysis results found"}
+        
+        # Clean results
+        cleaned_results = [clean_doc(result) for result in results]
+        
+        return {
+            "status": "success",
+            "latest_analyses": cleaned_results,
+            "count": len(cleaned_results)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get news analysis status: {str(e)}")
+
+async def run_news_analysis_task():
+    """Background task to run news analysis"""
+    analyzer = NewsAnalyzer()
+    try:
+        await analyzer.connect()
+        await analyzer.run_news_analysis()
+    except Exception as e:
+        print(f"Error in news analysis task: {e}")
+    finally:
+        await analyzer.disconnect()
