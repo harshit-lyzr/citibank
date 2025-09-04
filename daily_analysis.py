@@ -12,12 +12,14 @@ This script runs as a cron job every 24 hours to:
 
 import os
 import asyncio
+import os
+import logging
 import httpx
 import json
-import logging
 from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
+from uuid import uuid4
 
 load_dotenv()
 
@@ -218,7 +220,7 @@ class DailyAnalyzer:
                 logger.error(f"❌ Caused by: {e.__cause__}")
             return None
     
-    async def analyze_and_save_portfolio(self, portfolio, news_data, filings_data, portfolio_index):
+    async def analyze_and_save_portfolio(self, portfolio, news_data, filings_data, portfolio_index, analysis_id):
         """Analyze individual portfolio and save to database"""
         try:
             logger.info(f"📈 Analyzing portfolio {portfolio_index}")
@@ -235,7 +237,8 @@ class DailyAnalyzer:
                 await self.save_analysis_to_db(
                     analysis_data=result,
                     analysis_type=f"portfolio_{portfolio_index}",
-                    portfolio_data=portfolio
+                    portfolio_data=portfolio,
+                    analysis_id=analysis_id
                 )
                 
                 return {
@@ -249,7 +252,7 @@ class DailyAnalyzer:
             logger.error(f"❌ Error analyzing portfolio {portfolio_index}: {e}")
             return None
     
-    async def analyze_and_save_all_portfolios(self, portfolios_data, news_data, filings_data):
+    async def analyze_and_save_all_portfolios(self, portfolios_data, news_data, filings_data, analysis_id):
         """Analyze all portfolios together and save to database"""
         try:
             logger.info("📊 Running all-portfolio analysis...")
@@ -266,7 +269,8 @@ class DailyAnalyzer:
                 await self.save_analysis_to_db(
                     analysis_data=result,
                     analysis_type="all_portfolios",
-                    portfolio_data=portfolios_data
+                    portfolio_data=portfolios_data,
+                    analysis_id=analysis_id
                 )
                 
             return result
@@ -275,12 +279,13 @@ class DailyAnalyzer:
             logger.error(f"❌ Error in all-portfolio analysis: {e}")
             return None
     
-    async def save_analysis_to_db(self, analysis_data, analysis_type, portfolio_data=None):
+    async def save_analysis_to_db(self, analysis_data, analysis_type, portfolio_data=None, analysis_id=None):
         """Save analysis results to MongoDB"""
         try:
             today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             
             analysis_doc = {
+                "analysis_id": analysis_id,
                 "date": today,
                 "analysis_type": analysis_type,
                 "portfolio": portfolio_data,
@@ -301,6 +306,14 @@ class DailyAnalyzer:
         """Main function to run daily analysis"""
         try:
             logger.info("🚀 Starting daily portfolio analysis...")
+            
+            # Generate unique analysis ID for this run
+            analysis_id = f"daily-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{str(uuid4())[:8]}"
+            logger.info(f"📋 Analysis ID: {analysis_id}")
+            
+            # Check if analysis already exists for today
+            today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            
             
             # Fetch data
             news_data = await self.fetch_last_24h_news()
@@ -326,7 +339,8 @@ class DailyAnalyzer:
                     portfolio=portfolio,
                     news_data=news_data,
                     filings_data=filings_data,
-                    portfolio_index=i
+                    portfolio_index=i,
+                    analysis_id=analysis_id
                 )
                 individual_tasks.append(task)
             
@@ -334,7 +348,8 @@ class DailyAnalyzer:
             all_portfolio_task = self.analyze_and_save_all_portfolios(
                 portfolios_data=portfolios_data,
                 news_data=news_data,
-                filings_data=filings_data
+                filings_data=filings_data,
+                analysis_id=analysis_id
             )
             
             # Run all tasks in parallel

@@ -74,13 +74,15 @@ async def get_news_by_id(news_id: str):
 async def trigger_daily_analysis(background_tasks: BackgroundTasks):
     """Trigger daily portfolio analysis manually"""
     try:
+        analysis_id = f"daily-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{str(uuid4())[:8]}"
         # Run analysis in background
-        background_tasks.add_task(run_daily_analysis_task)
+        background_tasks.add_task(run_daily_analysis_task, analysis_id)
         
         return {
             "status": "success",
             "message": "Daily analysis started in background",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "analysis_id": analysis_id
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start daily analysis: {str(e)}")
@@ -111,7 +113,7 @@ async def get_daily_analysis_status():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get analysis status: {str(e)}")
 
-async def run_daily_analysis_task():
+async def run_daily_analysis_task(analysis_id: str):
     """Background task to run daily analysis"""
     analyzer = DailyAnalyzer()
     try:
@@ -127,13 +129,15 @@ async def run_daily_analysis_task():
 async def trigger_news_analysis(background_tasks: BackgroundTasks):
     """Trigger news analysis manually"""
     try:
+        analysis_id = f"news-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{str(uuid4())[:8]}"
         # Run analysis in background
-        background_tasks.add_task(run_news_analysis_task)
+        background_tasks.add_task(run_news_analysis_task, analysis_id)
         
         return {
             "status": "success",
             "message": "News analysis started in background",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "analysis_id": analysis_id
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start news analysis: {str(e)}")
@@ -164,7 +168,7 @@ async def get_news_analysis_status():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get news analysis status: {str(e)}")
 
-async def run_news_analysis_task():
+async def run_news_analysis_task(analysis_id: str):
     """Background task to run news analysis"""
     analyzer = NewsAnalyzer()
     try:

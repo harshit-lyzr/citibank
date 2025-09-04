@@ -16,6 +16,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
+from uuid import uuid4
 
 load_dotenv()
 
@@ -183,12 +184,13 @@ class NewsAnalyzer:
             logger.error(f"❌ Error calling Lyzr API: {str(e)}")
             return None
     
-    async def save_analysis_to_db(self, analysis_data, portfolios_data, news_data):
+    async def save_analysis_to_db(self, analysis_data, portfolios_data, news_data, analysis_id=None):
         """Save news analysis results to MongoDB"""
         try:
             today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             
             analysis_doc = {
+                "analysis_id": analysis_id,
                 "date": today,
                 "analysis_type": "news_analysis_all_portfolios",
                 "portfolios": portfolios_data,
@@ -210,6 +212,25 @@ class NewsAnalyzer:
         """Main function to run news analysis"""
         try:
             logger.info("🚀 Starting news analysis...")
+            
+            # Generate unique analysis ID for this run
+            analysis_id = f"news-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{str(uuid4())[:8]}"
+            logger.info(f"📋 Analysis ID: {analysis_id}")
+            
+            # Check if analysis already exists for today
+            today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            existing_analysis = await self.news_analysis_collection.find_one({
+                "date": today,
+                "analysis_type": "news_analysis_all_portfolios"
+            })
+            
+            if existing_analysis:
+                logger.warning(f"⚠️ News analysis already exists for {today.date()}. Use analysis_id: {existing_analysis.get('analysis_id')}")
+                return {
+                    "status": "already_exists",
+                    "existing_analysis_id": existing_analysis.get('analysis_id'),
+                    "date": today.date()
+                }
             
             # Fetch data
             news_data = await self.fetch_last_24h_news()
@@ -237,12 +258,14 @@ class NewsAnalyzer:
                 await self.save_analysis_to_db(
                     analysis_data=result,
                     portfolios_data=portfolios_data,
-                    news_data=news_data
+                    news_data=news_data,
+                    analysis_id=analysis_id
                 )
                 
                 analysis_result = {
                     "portfolios": portfolios_data,
-                    "analysis": result
+                    "analysis": result,
+                    "analysis_id": analysis_id
                 }
             else:
                 analysis_result = None
