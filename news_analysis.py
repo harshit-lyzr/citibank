@@ -129,7 +129,7 @@ class NewsAnalyzer:
             session_id = f"{LYZR_AGENT_ID}-news-analysis-{datetime.now().strftime('%Y%m%d%H%M%S')}"
             
             # Prepare message with all portfolios
-            message = f"Portfolio: {json.dumps(portfolios_data, default=str)} news: {json.dumps(news_data, default=str)}"
+            message = f"news: {json.dumps(news_data, default=str)}"
             
             # API payload
             payload = {
@@ -159,7 +159,25 @@ class NewsAnalyzer:
                             result = response.json()
                             ai_response = result.get('response', '')
                             logger.info(f"✅ Lyzr news analysis completed for all portfolios")
-                            return ai_response
+                            
+                            # Parse the JSON response to dictionary
+                            try:
+                                if isinstance(ai_response, str):
+                                    # Try to parse JSON string to dictionary
+                                    parsed_response = json.loads(ai_response)
+                                    logger.info(f"📊 Successfully parsed JSON response for news analysis")
+                                    return parsed_response
+                                elif isinstance(ai_response, dict):
+                                    # Already a dictionary
+                                    logger.info(f"📊 Response already in dictionary format for news analysis")
+                                    return ai_response
+                                else:
+                                    logger.warning(f"⚠️ Unexpected response format for news analysis, storing as-is")
+                                    return ai_response
+                            except json.JSONDecodeError as e:
+                                logger.error(f"❌ Failed to parse JSON response for news analysis: {e}")
+                                logger.info(f"📝 Storing raw response for news analysis")
+                                return {"raw_response": ai_response, "parse_error": str(e)}
                         else:
                             logger.error(f"❌ Lyzr API error {response.status_code}: {response.text}")
                             if attempt < max_retries - 1:
@@ -185,9 +203,24 @@ class NewsAnalyzer:
             return None
     
     async def save_analysis_to_db(self, analysis_data, portfolios_data, news_data, analysis_id=None):
-        """Save news analysis results to MongoDB"""
+        """Save news analysis results to MongoDB with structured data"""
         try:
             today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # Ensure analysis_data is properly structured
+            structured_analysis = analysis_data
+            if isinstance(analysis_data, dict):
+                # Extract key components from the structured response
+                structured_analysis = {
+                    "key_insights": analysis_data.get("key_insights", []),
+                    "raw_response": analysis_data.get("raw_response"),  # In case of parse errors
+                    "parse_error": analysis_data.get("parse_error")     # In case of parse errors
+                }
+                logger.info(f"📊 Structured news analysis data with {len(analysis_data.get('key_insights', []))} insights")
+            else:
+                # Fallback for non-dict responses
+                structured_analysis = {"raw_response": analysis_data}
+                logger.warning(f"⚠️ Non-structured news analysis data")
             
             analysis_doc = {
                 "analysis_id": analysis_id,
@@ -195,13 +228,19 @@ class NewsAnalyzer:
                 "analysis_type": "news_analysis_all_portfolios",
                 "portfolios": portfolios_data,
                 "news_data": news_data,
-                "analysis_result": analysis_data,
+                "analysis_result": structured_analysis,
                 "created_at": datetime.now(timezone.utc),
                 "status": "completed"
             }
             
             result = await self.news_analysis_collection.insert_one(analysis_doc)
             logger.info(f"✅ Saved news analysis for all portfolios to database with ID: {result.inserted_id}")
+            
+            # Log the structure for debugging
+            if isinstance(structured_analysis, dict) and "key_insights" in structured_analysis:
+                insights_count = len(structured_analysis.get("key_insights", []))
+                logger.info(f"📈 News analysis saved with {insights_count} key insights")
+            
             return result.inserted_id
             
         except Exception as e:
@@ -216,21 +255,6 @@ class NewsAnalyzer:
             # Generate unique analysis ID for this run
             analysis_id = f"news-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{str(uuid4())[:8]}"
             logger.info(f"📋 Analysis ID: {analysis_id}")
-            
-            # Check if analysis already exists for today
-            today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-            existing_analysis = await self.news_analysis_collection.find_one({
-                "date": today,
-                "analysis_type": "news_analysis_all_portfolios"
-            })
-            
-            if existing_analysis:
-                logger.warning(f"⚠️ News analysis already exists for {today.date()}. Use analysis_id: {existing_analysis.get('analysis_id')}")
-                return {
-                    "status": "already_exists",
-                    "existing_analysis_id": existing_analysis.get('analysis_id'),
-                    "date": today.date()
-                }
             
             # Fetch data
             news_data = await self.fetch_last_24h_news()
