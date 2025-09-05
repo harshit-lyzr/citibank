@@ -45,7 +45,7 @@ STOCKS_COLLECTION = "stocks"
 # Lyzr API Configuration
 LYZR_API_URL = "https://agent-prod.studio.lyzr.ai/v3/inference/chat/"
 LYZR_API_KEY = "sk-default-PnO8PLVxE8ukLHaAVFQPbnlUYmkkEfXs"
-LYZR_AGENT_ID = "68b6c68de2e877db76241f13"
+LYZR_AGENT_ID = "68bac0f1c66dc016731ec4a3"
 LYZR_USER_ID = "harshit@lyzr.ai"
 
 class DailyAnalyzer:
@@ -192,7 +192,25 @@ class DailyAnalyzer:
                             result = response.json()
                             ai_response = result.get('response', '')
                             logger.info(f"✅ Lyzr analysis completed for {analysis_type}")
-                            return ai_response
+                            
+                            # Parse the JSON response to dictionary
+                            try:
+                                if isinstance(ai_response, str):
+                                    # Try to parse JSON string to dictionary
+                                    parsed_response = json.loads(ai_response)
+                                    logger.info(f"📊 Successfully parsed JSON response for {analysis_type}")
+                                    return parsed_response
+                                elif isinstance(ai_response, dict):
+                                    # Already a dictionary
+                                    logger.info(f"📊 Response already in dictionary format for {analysis_type}")
+                                    return ai_response
+                                else:
+                                    logger.warning(f"⚠️ Unexpected response format for {analysis_type}, storing as-is")
+                                    return ai_response
+                            except json.JSONDecodeError as e:
+                                logger.error(f"❌ Failed to parse JSON response for {analysis_type}: {e}")
+                                logger.info(f"📝 Storing raw response for {analysis_type}")
+                                return {"raw_response": ai_response, "parse_error": str(e)}
                         else:
                             logger.error(f"❌ Lyzr API error {response.status_code}: {response.text}")
                             if attempt < max_retries - 1:
@@ -280,9 +298,29 @@ class DailyAnalyzer:
             return None
     
     async def save_analysis_to_db(self, analysis_data, analysis_type, portfolio_data=None, analysis_id=None):
-        """Save analysis results to MongoDB"""
+        """Save analysis results to MongoDB with structured data"""
         try:
             today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # Ensure analysis_data is properly structured
+            structured_analysis = analysis_data
+            if isinstance(analysis_data, dict):
+                # Extract key components from the structured response
+                structured_analysis = {
+                    "header": analysis_data.get("header", {}),
+                    "portfolio_holdings": analysis_data.get("portfolio_holdings", {}),
+                    "event_driven_credit_analysis": analysis_data.get("event_driven_credit_analysis", {}),
+                    "performance_analysis": analysis_data.get("performance_analysis", {}),
+                    "performance_chart": analysis_data.get("performance_chart", {}),
+                    "monthly_performance_table": analysis_data.get("monthly_performance_table", []),
+                    "raw_response": analysis_data.get("raw_response"),  # In case of parse errors
+                    "parse_error": analysis_data.get("parse_error")     # In case of parse errors
+                }
+                logger.info(f"📊 Structured analysis data for {analysis_type}")
+            else:
+                # Fallback for non-dict responses
+                structured_analysis = {"raw_response": analysis_data}
+                logger.warning(f"⚠️ Non-structured analysis data for {analysis_type}")
             
             analysis_doc = {
                 "analysis_id": analysis_id,
@@ -296,6 +334,13 @@ class DailyAnalyzer:
             
             result = await self.analysis_collection.insert_one(analysis_doc)
             logger.info(f"✅ Saved {analysis_type} analysis to database with ID: {result.inserted_id}")
+            
+            # Log the structure for debugging
+            if isinstance(structured_analysis, dict) and "header" in structured_analysis:
+                client_name = structured_analysis.get("header", {}).get("client_name", "Unknown")
+                holdings_count = len(structured_analysis.get("portfolio_holdings", {}))
+                logger.info(f"📈 Analysis saved - Client: {client_name}, Holdings: {holdings_count} tickers")
+            
             return result.inserted_id
             
         except Exception as e:
