@@ -53,13 +53,39 @@ async def create_news(news: NewsCreate):
     await news_collection.insert_one(item.dict())
     return item
 
-# ----- GET all news -----
+# ----- GET all news with pagination -----
 @app.get("/news")
-async def get_news():
-    news_list = await news_collection.find().to_list(length=100)  # fetch max 100
-    if not news_list:
-        raise HTTPException(status_code=404, detail="No news found")
-    return [clean_doc(n) for n in news_list]
+async def get_news(page: int = 1, page_size: int = 100):
+    """Get paginated news items"""
+    if page < 1:
+        raise HTTPException(status_code=400, detail="Page must be >= 1")
+    if page_size < 1 or page_size > 500:
+        raise HTTPException(status_code=400, detail="Page size must be between 1 and 500")
+    
+    skip = (page - 1) * page_size
+    
+    # Get total count for pagination info
+    total_count = await news_collection.count_documents({})
+    
+    # Get paginated results sorted by created_at descending (newest first)
+    news_list = await news_collection.find().sort("created_at", -1).skip(skip).limit(page_size).to_list(length=page_size)
+    
+    if not news_list and page > 1:
+        raise HTTPException(status_code=404, detail="Page not found")
+    
+    total_pages = (total_count + page_size - 1) // page_size
+    
+    return {
+        "news": [clean_doc(n) for n in news_list],
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total_items": total_count,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+            "has_prev": page > 1
+        }
+    }
 
 # ----- GET news by ID -----
 @app.get("/news/{news_id}", response_model=NewsItem)
