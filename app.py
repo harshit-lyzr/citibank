@@ -53,10 +53,10 @@ async def create_news(news: NewsCreate):
     await news_collection.insert_one(item.dict())
     return item
 
-# ----- GET all news with pagination -----
+# ----- GET all news with pagination and ticker filter -----
 @app.get("/news")
-async def get_news(page: int = 1, page_size: int = 100):
-    """Get paginated news items"""
+async def get_news(page: int = 1, page_size: int = 100, ticker: str = None):
+    """Get paginated news items with optional ticker filter"""
     if page < 1:
         raise HTTPException(status_code=400, detail="Page must be >= 1")
     if page_size < 1 or page_size > 500:
@@ -64,11 +64,16 @@ async def get_news(page: int = 1, page_size: int = 100):
     
     skip = (page - 1) * page_size
     
+    # Build query filter
+    query_filter = {}
+    if ticker:
+        query_filter["ticker"] = ticker.upper()  # Normalize ticker to uppercase
+    
     # Get total count for pagination info
-    total_count = await news_collection.count_documents({})
+    total_count = await news_collection.count_documents(query_filter)
     
     # Get paginated results sorted by created_at descending (newest first)
-    news_list = await news_collection.find().sort("created_at", -1).skip(skip).limit(page_size).to_list(length=page_size)
+    news_list = await news_collection.find(query_filter).sort("created_at", -1).skip(skip).limit(page_size).to_list(length=page_size)
     
     if not news_list and page > 1:
         raise HTTPException(status_code=404, detail="Page not found")
@@ -84,6 +89,9 @@ async def get_news(page: int = 1, page_size: int = 100):
             "total_pages": total_pages,
             "has_next": page < total_pages,
             "has_prev": page > 1
+        },
+        "filter": {
+            "ticker": ticker.upper() if ticker else None
         }
     }
 
